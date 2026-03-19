@@ -69,6 +69,11 @@ const WID='8f3787d1-0ad3-40f4-a519-f14dbbddb1ef';
 let sessions=[],selected=null;
 function fmt(s){if(!s)return'0s';const m=Math.floor(s/60),sec=Math.round(s%60);return m>0?m+'m '+sec+'s':sec+'s'}
 function fmtDate(ts){if(!ts)return'';return new Date(ts).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+function extractPageUrl(p){
+  if(typeof p==='string')return p;
+  if(!p||typeof p!=='object')return'unknown';
+  return p.url||p.path||p.href||p.title||p.location||JSON.stringify(p).substring(0,60);
+}
 async function load(){
   document.getElementById('err').textContent='';
   document.getElementById('status').textContent='Fetching sessions...';
@@ -103,7 +108,8 @@ function renderList(recs){
   if(!recs.length){c.innerHTML='<p style="color:#555;padding:2rem 0;text-align:center">No sessions found.</p>';return}
   c.innerHTML=recs.map((s,i)=>{
     const f=s.frictionScore||s.friction||0;const pages=s.pageCount||(s.pageViews&&s.pageViews.length)||0;
-    const url=s.landingPage||s.startPage||'';const flow=s.pageViews?s.pageViews.map(p=>p.url||p.path||'').filter(Boolean).join(' > '):'';
+    const url=s.landingPage||s.startPage||'';
+    const flow=s.pageViews?s.pageViews.map(p=>extractPageUrl(p)).filter(Boolean).join(' > '):'';
     return '<div class="card" id="c'+i+'" onclick="pick('+i+')">'+'<div class="card-top"><span class="sid">'+(s.id||s.sessionId||s.recordingId||'?').toString().substring(0,20)+'...</span><div class="badges">'+(f>0?'<span class="badge b-friction">friction '+Math.round(f)+'</span>':'')+(s.starred?'<span class="badge b-star">starred</span>':'')+'<span class="badge b-dur">'+fmt(s.duration)+'</span>'+(pages>0?'<span class="badge b-pages">'+pages+'p</span>':'')+'</div></div><div class="card-url">'+(url||'unknown page')+'</div>'+(flow?'<div class="card-flow">'+flow+'</div>':'')+'<div class="card-meta">'+fmtDate(s.start||s.date||s.createdAt)+'</div></div>';
   }).join('');
 }
@@ -113,7 +119,7 @@ function summary(s){
   if(s.landingPage||s.startPage)lines.push('Landing page: '+(s.landingPage||s.startPage));
   if(s.browser)lines.push('Browser: '+s.browser);if(s.device||s.deviceType)lines.push('Device: '+(s.device||s.deviceType));if(s.country)lines.push('Country: '+s.country);
   if(s.tags&&s.tags.length)lines.push('Tags: '+s.tags.join(', '));if(s.variables&&Object.keys(s.variables).length)lines.push('Variables: '+JSON.stringify(s.variables));
-  if(s.pageViews&&s.pageViews.length){lines.push('Page flow:');s.pageViews.forEach((p,i)=>lines.push('  '+(i+1)+'. '+(p.url||p.path||p)+(p.duration?' ('+fmt(p.duration)+')':'')))}
+  if(s.pageViews&&s.pageViews.length){lines.push('Page flow:');s.pageViews.forEach((p,i)=>lines.push('  '+(i+1)+'. '+extractPageUrl(p)+(p.duration?' ('+fmt(p.duration)+')':'')))}
   return lines.join('\n');
 }
 function showDetail(s){

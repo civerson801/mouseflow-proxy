@@ -1,0 +1,3 @@
+{
+  "rewrites": [{ "source": "/api/mouseflow/:path*", "destination": "/api/mouseflow?path=:path*" }]
+}

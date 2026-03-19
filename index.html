@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mouseflow Session Triage</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0a;color:#e5e5e5;min-height:100vh;padding:2rem}
+h1{font-size:20px;font-weight:500;margin-bottom:4px}
+.sub{font-size:13px;color:#888;margin-bottom:1.5rem}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:1.25rem}
+.ctrl{display:flex;flex-direction:column;gap:4px}
+label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em}
+select,input[type=number]{height:36px;padding:0 10px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;color:#e5e5e5;font-size:13px}
+.btn{height:36px;padding:0 16px;border-radius:6px;font-size:13px;cursor:pointer;border:1px solid #2a2a2a;background:#1a1a1a;color:#e5e5e5}
+.btn:hover{background:#222}
+.btn-primary{background:#e5e5e5;color:#0a0a0a;border-color:#e5e5e5}
+.btn-primary:hover{background:#ccc}
+.btn-blue{background:#1a3a5c;color:#60a5fa;border-color:#2a5a8c}
+.btn-green{background:#0f2a1a;color:#4ade80;border-color:#1a5a2a}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-bottom:1.25rem}
+.stat{background:#141414;border:1px solid #222;border-radius:8px;padding:10px 12px}
+.stat-label{font-size:11px;color:#666;margin-bottom:2px}
+.stat-value{font-size:22px;font-weight:500}
+.sessions{display:flex;flex-direction:column;gap:8px}
+.card{background:#111;border:1px solid #1e1e1e;border-radius:10px;padding:12px 14px;cursor:pointer;transition:border-color .1s}
+.card:hover{border-color:#333}
+.card.selected{border-color:#3b82f6;background:#0f1f35}
+.card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px}
+.sid{font-size:11px;font-family:monospace;color:#555}
+.card.selected .sid{color:#60a5fa}
+.badges{display:flex;gap:5px;flex-wrap:wrap}
+.badge{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:500}
+.b-friction{background:#3b1111;color:#f87171}
+.b-dur,.b-pages{background:#1a1a1a;color:#888}
+.b-star{background:#2a2000;color:#fbbf24}
+.card-url{font-size:13px;color:#ccc;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card.selected .card-url{color:#93c5fd}
+.card-flow{font-size:11px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px}
+.card.selected .card-flow{color:#3b82f6}
+.card-meta{font-size:11px;color:#555}
+.card.selected .card-meta{color:#60a5fa}
+.detail{background:#111;border:1px solid #1e1e1e;border-radius:10px;padding:16px;margin-top:1rem}
+.detail h3{font-size:14px;font-weight:500;margin-bottom:10px;color:#ccc}
+.detail-body{font-size:12px;font-family:monospace;color:#888;white-space:pre-wrap;line-height:1.7;margin-bottom:12px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.status{font-size:12px;color:#666;margin-bottom:1rem;min-height:18px}
+.err{color:#f87171;font-size:13px;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>Mouseflow session triage</h1>
+<p class="sub">Fetch sessions, select one, then analyze or generate a Jira ticket.</p>
+<div class="controls">
+  <div class="ctrl"><label>Limit</label><input type="number" id="limit" value="20" min="1" max="100" style="width:80px"></div>
+  <div class="ctrl"><label>Sort by</label><select id="sort"><option value="friction">Friction score</option><option value="duration">Duration</option><option value="pages">Page count</option><option value="date">Date</option></select></div>
+  <div class="ctrl"><label>Min friction</label><input type="number" id="minF" value="0" min="0" max="100" style="width:80px"></div>
+  <div class="ctrl"><label>&nbsp;</label><button class="btn btn-primary" onclick="load()">Fetch sessions</button></div>
+</div>
+<div id="status" class="status"></div>
+<div id="stats" class="stats" style="display:none"></div>
+<div id="list" class="sessions"></div>
+<div id="detail" style="display:none"></div>
+<div id="err" class="err"></div>
+<script>
+const PROXY='/api/mouseflow';
+const WID='8f3787d1-0ad3-40f4-a519-f14dbbddb1ef';
+let sessions=[],selected=null;
+function fmt(s){if(!s)return'0s';const m=Math.floor(s/60),sec=Math.round(s%60);return m>0?m+'m '+sec+'s':sec+'s'}
+function fmtDate(ts){if(!ts)return'';return new Date(ts).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+async function load(){
+  document.getElementById('err').textContent='';
+  document.getElementById('status').textContent='Fetching sessions...';
+  document.getElementById('list').innerHTML='';
+  document.getElementById('stats').style.display='none';
+  document.getElementById('detail').style.display='none';
+  selected=null;
+  const limit=document.getElementById('limit').value||20;
+  const minF=parseInt(document.getElementById('minF').value)||0;
+  try{
+    const res=await fetch(PROXY+'/websites/'+WID+'/recordings?limit='+limit);
+    if(!res.ok){document.getElementById('err').textContent='API error '+res.status;document.getElementById('status').textContent='';return}
+    const data=await res.json();
+    let recs=data.recordings||data||[];
+    if(minF>0)recs=recs.filter(r=>(r.frictionScore||r.friction||0)>=minF);
+    const s=document.getElementById('sort').value;
+    recs.sort((a,b)=>{if(s==='friction')return(b.frictionScore||b.friction||0)-(a.frictionScore||a.friction||0);if(s==='duration')return(b.duration||0)-(a.duration||0);if(s==='pages')return(b.pageCount||0)-(a.pageCount||0);return new Date(b.start||b.date||0)-new Date(a.start||a.date||0)});
+    sessions=recs;renderStats(recs);renderList(recs);
+    document.getElementById('status').textContent=recs.length+' session'+(recs.length!==1?'s':'')+' loaded';
+  }catch(e){document.getElementById('err').textContent='Error: '+e.message;document.getElementById('status').textContent=''}
+}
+function renderStats(r){
+  if(!r.length)return;
+  const avgF=Math.round(r.reduce((a,x)=>a+(x.frictionScore||x.friction||0),0)/r.length);
+  const avgD=fmt(r.reduce((a,x)=>a+(x.duration||0),0)/r.length);
+  const hi=r.filter(x=>(x.frictionScore||x.friction||0)>20).length;
+  const el=document.getElementById('stats');el.style.display='grid';
+  el.innerHTML='<div class="stat"><div class="stat-label">Sessions</div><div class="stat-value">'+r.length+'</div></div><div class="stat"><div class="stat-label">Avg friction</div><div class="stat-value">'+avgF+'</div></div><div class="stat"><div class="stat-label">High friction</div><div class="stat-value">'+hi+'</div></div><div class="stat"><div class="stat-label">Avg duration</div><div class="stat-value">'+avgD+'</div></div>';
+}
+function renderList(recs){
+  const c=document.getElementById('list');
+  if(!recs.length){c.innerHTML='<p style="color:#555;padding:2rem 0;text-align:center">No sessions found.</p>';return}
+  c.innerHTML=recs.map((s,i)=>{
+    const f=s.frictionScore||s.friction||0;const pages=s.pageCount||(s.pageViews&&s.pageViews.length)||0;
+    const url=s.landingPage||s.startPage||'';const flow=s.pageViews?s.pageViews.map(p=>p.url||p.path||'').filter(Boolean).join(' > '):'';
+    return '<div class="card" id="c'+i+'" onclick="pick('+i+')">'+'<div class="card-top"><span class="sid">'+(s.id||s.sessionId||s.recordingId||'?').toString().substring(0,20)+'...</span><div class="badges">'+(f>0?'<span class="badge b-friction">friction '+Math.round(f)+'</span>':'')+(s.starred?'<span class="badge b-star">starred</span>':'')+'<span class="badge b-dur">'+fmt(s.duration)+'</span>'+(pages>0?'<span class="badge b-pages">'+pages+'p</span>':'')+'</div></div><div class="card-url">'+(url||'unknown page')+'</div>'+(flow?'<div class="card-flow">'+flow+'</div>':'')+'<div class="card-meta">'+fmtDate(s.start||s.date||s.createdAt)+'</div></div>';
+  }).join('');
+}
+function pick(i){document.querySelectorAll('.card').forEach(c=>c.classList.remove('selected'));document.getElementById('c'+i).classList.add('selected');selected=sessions[i];showDetail(selected)}
+function summary(s){
+  const lines=['ID: '+(s.id||s.sessionId||s.recordingId||'unknown'),'Date: '+fmtDate(s.start||s.date||s.createdAt),'Duration: '+fmt(s.duration),'Friction score: '+Math.round(s.frictionScore||s.friction||0),'Pages visited: '+(s.pageCount||(s.pageViews&&s.pageViews.length)||0)];
+  if(s.landingPage||s.startPage)lines.push('Landing page: '+(s.landingPage||s.startPage));
+  if(s.browser)lines.push('Browser: '+s.browser);if(s.device||s.deviceType)lines.push('Device: '+(s.device||s.deviceType));if(s.country)lines.push('Country: '+s.country);
+  if(s.tags&&s.tags.length)lines.push('Tags: '+s.tags.join(', '));if(s.variables&&Object.keys(s.variables).length)lines.push('Variables: '+JSON.stringify(s.variables));
+  if(s.pageViews&&s.pageViews.length){lines.push('Page flow:');s.pageViews.forEach((p,i)=>lines.push('  '+(i+1)+'. '+(p.url||p.path||p)+(p.duration?' ('+fmt(p.duration)+')':'')))}
+  return lines.join('\n');
+}
+function showDetail(s){
+  const el=document.getElementById('detail');el.style.display='block';
+  el.innerHTML='<div class="detail"><h3>Session detail</h3><div class="detail-body">'+summary(s)+'</div><div class="actions"><button class="btn btn-blue" onclick="analyze()">Analyze friction points</button><button class="btn btn-green" onclick="jira()">Draft Jira ticket</button><button class="btn" onclick="replay()">Open replay</button></div></div>';
+  el.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function analyze(){if(!selected)return;window.open('https://claude.ai/new?q='+encodeURIComponent('Analyze this Mouseflow session and identify UX friction points, potential bugs, or feature improvement opportunities:\n\n'+summary(selected)),'_blank')}
+function jira(){if(!selected)return;window.open('https://claude.ai/new?q='+encodeURIComponent('Based on this Mouseflow session, draft a Jira bug or story ticket (parent TDG-125, Sprint 158 ID 610, Component: Web, Labels: CCO + Raygun if a bug):\n\n'+summary(selected)),'_blank')}
+function replay(){if(!selected)return;const id=selected.id||selected.sessionId||selected.recordingId;window.open('https://us.mouseflow.com/websites/'+WID+'/recordings/'+id+'/play','_blank')}
+</script>
+</body>
+</html>
